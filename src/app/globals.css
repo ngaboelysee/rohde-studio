@@ -1,0 +1,286 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Self-hosted variable fonts ─────────────────────────────────── */
+/* Unbounded — wordmark + rare display statements only. */
+@font-face {
+  font-family: "Unbounded";
+  src: url("/fonts/Unbounded-Variable.woff2") format("woff2");
+  font-weight: 200 900;
+  font-style: normal;
+  font-display: swap;
+}
+/* Manrope — body, UI, everything readable. */
+@font-face {
+  font-family: "Manrope";
+  src: url("/fonts/Manrope-Variable.woff2") format("woff2");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --canvas: #0b0b0b;
+  --ink: #fbfbfb;
+  --grey: #8c8c8c;
+  --hairline: rgba(251, 251, 251, 0.14);
+  --brass: #c9a962;
+  --brass-deep: #a16207;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 5rem; /* fixed header must never obscure focus */
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    @apply bg-bone text-charcoal font-body antialiased;
+  }
+
+  ::selection {
+    background: var(--ink);
+    color: var(--canvas);
+  }
+
+  :focus-visible {
+    outline: 1px solid var(--ink);
+    outline-offset: 3px;
+  }
+
+  /*
+   * Brass accent — the single colour the monochrome system allows.
+   * (ui-ux-pro-max: "E-commerce Luxury — premium dark + gold accent")
+   * Surfaces stay black/white; interaction carries the gold.
+   */
+  .accent-brass {
+    transition: color 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .accent-brass:hover,
+  .accent-brass:focus-visible {
+    color: var(--brass);
+  }
+
+  /* Editorial link — brass hairline slides in on hover. */
+  .link-brass {
+    @apply relative transition-colors duration-300;
+  }
+  .link-brass::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -2px;
+    height: 1px;
+    width: 100%;
+    background: var(--brass);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .link-brass:hover::after,
+  .link-brass:focus-visible::after {
+    transform: scaleX(1);
+  }
+  .link-brass:hover,
+  .link-brass:focus-visible {
+    color: var(--brass);
+  }
+
+  /*
+   * Glass surfaces — glassmorphism spec (blur, translucency, light rim).
+   * Static fallback first; @supports upgrades.
+   */
+  .glass-nav {
+    background: rgba(11, 11, 11, 0.82);
+    box-shadow: inset 0 1px 0 0 rgba(251, 251, 251, 0.1), inset 0 -1px 0 0 var(--hairline);
+  }
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .glass-nav {
+      background: rgba(11, 11, 11, 0.55);
+      -webkit-backdrop-filter: blur(24px) saturate(1.6);
+      backdrop-filter: blur(24px) saturate(1.6);
+      box-shadow: inset 0 1px 0 0 rgba(251, 251, 251, 0.14), inset 0 -1px 0 0 rgba(251, 251, 251, 0.08);
+    }
+  }
+
+  /*
+   * Liquid Glass — iOS-style floating island. Deep blur, high saturation,
+   * specular top rim, diagonal sheen, real float depth.
+   */
+  .liquid-glass {
+    position: relative;
+    overflow: hidden;
+    border-radius: 18px;
+    background: rgba(11, 11, 11, 0.66);
+    box-shadow:
+      inset 0 1px 0 0 rgba(251, 251, 251, 0.22),
+      inset 0 -1px 0 0 rgba(251, 251, 251, 0.07),
+      inset 1px 0 0 0 rgba(251, 251, 251, 0.05),
+      inset -1px 0 0 0 rgba(251, 251, 251, 0.05),
+      0 18px 50px rgba(0, 0, 0, 0.45);
+  }
+  /* Diagonal sheen — light catching the glass face. */
+  .liquid-glass::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(115deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.03) 30%, transparent 48%);
+    opacity: 0.6;
+  }
+  .liquid-glass > * {
+    position: relative;
+  }
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .liquid-glass {
+      background: rgba(11, 11, 11, 0.42);
+      -webkit-backdrop-filter: blur(28px) saturate(1.7);
+      backdrop-filter: blur(28px) saturate(1.7);
+    }
+    .liquid-glass.is-scrolled {
+      background: rgba(11, 11, 11, 0.58);
+    }
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  summary,
+  select,
+  label:has(input[type="checkbox"]),
+  label:has(input[type="radio"]) {
+    cursor: pointer;
+  }
+
+  a,
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  img {
+    background-color: #141414; /* calm placeholder — no layout flash */
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  .container-rohde {
+    @apply mx-auto w-full max-w-[92rem] px-5 md:px-12;
+  }
+
+  /* Small uppercase label — the only "chrome" text carries. */
+  .label-rohde {
+    @apply font-mono text-[10px] uppercase tracking-wider2 text-concrete-dim;
+  }
+
+  .heading-rohde {
+    @apply font-body font-light uppercase tracking-tighter2 leading-[1.02];
+  }
+
+  /* ─── Buttons: two, only two ─────────────────────────────────── */
+  /* On the black canvas: light solid + hairline ghost (inverted). */
+  .btn-charcoal {
+    @apply inline-flex min-h-12 items-center justify-center gap-2 bg-void px-10
+      text-[12px] font-medium uppercase tracking-[0.14em] text-offwhite
+      transition-all duration-300 ease-luxe
+      hover:text-brass-deep active:scale-[0.99]
+      disabled:cursor-not-allowed disabled:opacity-40;
+    border-radius: 1px;
+    /* centered on both axes: leading-none fixes the 'too high' look,
+       text-indent offsets trailing tracking. */
+    line-height: 1;
+    padding-top: 0.875rem;
+    padding-bottom: 0.875rem;
+    text-indent: 0.14em;
+  }
+
+  .btn-ghost {
+    @apply inline-flex min-h-12 items-center justify-center gap-2 border border-charcoal/30
+      bg-transparent px-10 text-[12px] font-medium uppercase tracking-[0.14em] text-charcoal
+      transition-all duration-300 ease-luxe
+      hover:border-brass hover:text-brass active:scale-[0.99]
+      disabled:cursor-not-allowed disabled:opacity-40;
+    border-radius: 1px;
+    line-height: 1;
+    padding-top: 0.875rem;
+    padding-bottom: 0.875rem;
+    text-indent: 0.14em;
+  }
+
+  /* ─── Hairline surfaces (black system) ───────────────────────── */
+  .tile-rohde {
+    @apply relative overflow-hidden;
+    background: #0b0b0b;
+    box-shadow: 0 0 0 1px var(--hairline);
+  }
+
+  .skeuo-well {
+    background: #050505;
+    box-shadow: inset 0 0 0 1px var(--hairline);
+  }
+
+  .skeuo-card {
+    background: #0b0b0b;
+    box-shadow: 0 0 0 1px var(--hairline);
+  }
+
+  .skeuo-bar {
+    background: rgba(11, 11, 11, 0.92);
+    box-shadow: 0 0 0 1px var(--hairline);
+  }
+
+  /* Quiet grain — kept, barely there. Screen blend lights the black canvas. */
+  .skeuo-grain::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.18;
+    mix-blend-mode: screen;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.4'/%3E%3C/svg%3E");
+  }
+
+  /* Editorial underline — links reveal a hairline, they never shout. */
+  .link-rohde {
+    @apply relative transition-opacity duration-300;
+  }
+  .link-rohde::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -2px;
+    height: 1px;
+    width: 100%;
+    background: currentColor;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .link-rohde:hover::after {
+    transform: scaleX(1);
+  }
+}
+
+.scroll-rohde {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(251, 251, 251, 0.28) transparent;
+}
+.scroll-rohde::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.scroll-rohde::-webkit-scrollbar-thumb {
+  background: rgba(251, 251, 251, 0.28);
+}
