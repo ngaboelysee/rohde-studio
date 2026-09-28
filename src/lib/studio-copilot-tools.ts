@@ -32,6 +32,7 @@ export async function toolInventoryLookup(input: {
       OR: [{ slug: q.toLowerCase() }, { name: { contains: q, mode: "insensitive" } }],
     },
     include: {
+      category: true,
       variants: {
         where: { active: true },
         orderBy: { size: "asc" },
@@ -57,7 +58,7 @@ export async function toolInventoryLookup(input: {
   return {
     ok: true,
     reply: [
-      `${product.name} (${product.status}, ${product.category}) — base ${formatPrice(product.basePrice, product.currency)}`,
+      `${product.name} (${product.status}, ${product.category.slug}) — base ${formatPrice(product.basePrice, product.currency)}`,
       ...lines,
       `TOTAL AVAILABLE: ${total} pieces`,
     ].join("\n"),

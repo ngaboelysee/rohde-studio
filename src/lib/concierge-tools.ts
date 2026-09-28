@@ -43,8 +43,10 @@ export async function toolSearchProducts(input: {
   let pool = products;
 
   if (input.category) {
-    const cat = input.category.toUpperCase();
-    pool = pool.filter((p) => p.category === cat || p.category.startsWith(cat));
+    const cat = input.category.toLowerCase();
+    pool = pool.filter(
+      (p) => p.category.toLowerCase().startsWith(cat) || p.categoryLabel.toLowerCase().includes(input.category!.toLowerCase())
+    );
   }
   if (typeof input.maxPrice === "number") {
     pool = pool.filter((p) => parseFloat(p.basePrice) <= input.maxPrice!);

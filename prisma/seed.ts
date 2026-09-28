@@ -5,7 +5,7 @@
  *
  * Run: npm run db:seed
  */
-import { PrismaClient, Category, ProductStatus } from "@prisma/client";
+import { PrismaClient, ProductStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
@@ -22,7 +22,7 @@ type SeedProduct = {
   name: string;
   description: string;
   story: string;
-  category: Category;
+  category: string; // category slug (admin-managed Category table)
   basePrice: number;
   dropName: string;
   isFeatured: boolean;
@@ -192,7 +192,17 @@ const PRODUCTS: SeedProduct[] = [
 async function main() {
   console.log("⭒ Seeding Rohde flagship database…");
 
-  // Catalog
+  // Catalog — ensure the six base categories exist (seeded by migration,
+  // but upserted here too so a fresh empty DB works).
+  const BASE_CATEGORIES = ["outerwear", "knitwear", "tops", "bottoms", "accessories", "footwear"];
+  for (const slug of BASE_CATEGORIES) {
+    await prisma.category.upsert({
+      where: { slug },
+      update: {},
+      create: { slug, label: slug.charAt(0).toUpperCase() + slug.slice(1) },
+    });
+  }
+
   for (const p of PRODUCTS) {
     const product = await prisma.product.upsert({
       where: { slug: p.slug },
@@ -202,7 +212,13 @@ async function main() {
         name: p.name,
         description: p.description,
         story: p.story,
-        category: p.category,
+        categoryId: (
+          await prisma.category.upsert({
+            where: { slug: p.category },
+            update: {},
+            create: { slug: p.category, label: p.category.charAt(0).toUpperCase() + p.category.slice(1) },
+          })
+        ).id,
         status: ProductStatus.ACTIVE,
         basePrice: p.basePrice,
         currency: "USD",

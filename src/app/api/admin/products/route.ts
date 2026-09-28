@@ -38,6 +38,15 @@ export const POST = withAdminGuard(async (req) => {
   }
   const input = parsed.data;
 
+  // Resolve the category slug to a live row (categories are admin-managed).
+  const category = await prisma.category.findUnique({
+    where: { slug: input.category.toLowerCase() },
+    select: { id: true, label: true },
+  });
+  if (!category) {
+    return NextResponse.json({ error: `Unknown category "${input.category}"` }, { status: 400 });
+  }
+
   const slug = input.slug && input.slug.length >= 2 ? input.slug : slugify(input.name);
   const exists = await prisma.product.findUnique({ where: { slug }, select: { id: true } });
   if (exists) {
@@ -50,7 +59,7 @@ export const POST = withAdminGuard(async (req) => {
       slug,
       description: input.description,
       story: input.story || null,
-      category: input.category,
+      categoryId: category.id,
       status: input.status,
       basePrice: input.basePrice,
       currency: input.currency,
@@ -67,7 +76,7 @@ export const POST = withAdminGuard(async (req) => {
     action: "product.created",
     entity: "Product",
     entityId: product.slug,
-    detail: { name: product.name, category: input.category, basePrice: input.basePrice },
+    detail: { name: product.name, category: category.label, basePrice: input.basePrice },
   });
 
   return NextResponse.json({ ok: true, product }, { status: 201 });
@@ -87,6 +96,19 @@ export const PATCH = withAdminGuard(async (req) => {
   }
   const { productId, ...data } = parsed.data;
 
+  // Resolve a category slug change to the live row.
+  let categoryId: string | undefined;
+  if (data.category !== undefined) {
+    const category = await prisma.category.findUnique({
+      where: { slug: data.category.toLowerCase() },
+      select: { id: true },
+    });
+    if (!category) {
+      return NextResponse.json({ error: `Unknown category "${data.category}"` }, { status: 400 });
+    }
+    categoryId = category.id;
+  }
+
   const existing = await prisma.product.findUnique({
     where: { id: productId },
     select: { id: true, slug: true, name: true },
@@ -100,7 +122,7 @@ export const PATCH = withAdminGuard(async (req) => {
   if (data.slug !== undefined && data.slug.length >= 2) update.slug = data.slug;
   if (data.description !== undefined) update.description = data.description;
   if (data.story !== undefined) update.story = data.story || null;
-  if (data.category !== undefined) update.category = data.category;
+  if (categoryId !== undefined) update.categoryId = categoryId;
   if (data.status !== undefined) update.status = data.status;
   if (data.basePrice !== undefined) update.basePrice = data.basePrice;
   if (data.currency !== undefined) update.currency = data.currency;

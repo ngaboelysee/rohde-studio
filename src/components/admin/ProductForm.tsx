@@ -11,7 +11,7 @@ export type ProductFormData = {
   id?: string;
   name: string;
   slug: string;
-  category: string;
+  category: string; // category slug
   basePrice: string;
   currency: string;
   description: string;
@@ -22,7 +22,8 @@ export type ProductFormData = {
   isFeatured: boolean;
 };
 
-const CATEGORY_VALUES = ["OUTERWEAR", "KNITWEAR", "TOPS", "BOTTOMS", "ACCESSORIES", "FOOTWEAR"];
+/** Category choices come from the admin-managed table, passed by the page. */
+export type CategoryOption = { slug: string; label: string };
 
 function slugify(name: string): string {
   return name
@@ -36,10 +37,12 @@ function slugify(name: string): string {
 
 export function ProductForm({
   initial,
+  categories,
   onDone,
   onCancel,
 }: {
   initial?: Partial<ProductFormData> & { id?: string };
+  categories: CategoryOption[];
   onDone: (msg: string) => void;
   onCancel: () => void;
 }) {
@@ -149,7 +152,9 @@ export function ProductForm({
             <label className={labelCls} htmlFor="pf-category">Category</label>
             <select id="pf-category" value={form.category} onChange={(e) => set("category", e.target.value)}
               className={inputCls}>
-              {CATEGORY_VALUES.map((c) => <option key={c} value={c}>{c}</option>)}
+              {categories.map((c) => (
+                <option key={c.slug} value={c.slug}>{c.label}</option>
+              ))}
             </select>
           </div>
 

@@ -9,15 +9,6 @@ import { RevealText } from "@/components/motion/RevealText";
 export const metadata: Metadata = pageMetadata({ title: "Catalog", path: "/products" });
 export const revalidate = 60;
 
-const CATEGORY_KEYS = [
-  "OUTERWEAR",
-  "KNITWEAR",
-  "TOPS",
-  "BOTTOMS",
-  "FOOTWEAR",
-  "ACCESSORIES",
-] as const;
-
 type SearchParams = { category?: string };
 
 async function Grid({ category }: { category?: string }) {
@@ -68,13 +59,9 @@ export default async function ProductsPage({
   const settings = await categorySettings();
   const CATEGORIES = [
     { key: "", label: "All" },
-    ...CATEGORY_KEYS.map((k) => ({ key: k, label: settings[k]?.label ?? k }))
-      // Admin-defined order (ascending), enum order as tiebreak
-      .sort((a, b) => {
-        const oa = settings[a.key]?.sortOrder ?? 0;
-        const ob = settings[b.key]?.sortOrder ?? 0;
-        return oa - ob;
-      }),
+    ...Object.entries(settings)
+      .map(([key, s]) => ({ key, label: s.label, sortOrder: s.sortOrder }))
+      .sort((a, b) => a.sortOrder - b.sortOrder),
   ];
 
   return (

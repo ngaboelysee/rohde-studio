@@ -109,14 +109,9 @@ enum ProductStatus {
   ARCHIVED
 }
 
-enum Category {
-  OUTERWEAR
-  KNITWEAR
-  TOPS
-  BOTTOMS
-  ACCESSORIES
-  FOOTWEAR
-}
+// NOTE: Category was previously a Postgres enum with six fixed values.
+// It is now a real table so the admin can create, rename and order
+// categories from the dashboard without a migration.
 
 model Product {
   id          String        @id @default(cuid())
@@ -124,7 +119,7 @@ model Product {
   name        String
   description String
   story       String? // editorial copy for the PDP lookbook block
-  category    Category
+  categoryId  String
   status      ProductStatus @default(DRAFT)
   basePrice   Decimal       @db.Decimal(12, 2) // minor-agnostic display price
   currency    String        @default("USD")
@@ -138,8 +133,9 @@ model Product {
   variants       Variant[]
   wishlistItems  WishlistItem[]
   reviews        Review[]
+  category       Category @relation(fields: [categoryId], references: [id])
 
-  @@index([status, category])
+  @@index([status, categoryId])
   @@index([isFeatured])
 }
 
@@ -385,9 +381,19 @@ model AdminAuditLog {
 // plus optional sort order in storefront menus. Rows are created lazily.
 // ─────────────────────────────────────────────────────────────────────────────
 
-model CategorySetting {
-  category   Category @id
-  label      String
+/// Admin-managed product categories. Seeded with the original six enum
+/// values; the dashboard can add more, rename any of them and reorder
+/// them for the storefront filter bar.
+model Category {
+  id         String   @id @default(cuid())
+  slug       String   @unique // stable key used by URLs and the concierge
+  label      String // customer-facing display name (admin-defined)
   sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true) // false hides it from the storefront filters
+  createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  products   Product[]
+
+  @@index([isActive, sortOrder])
 }

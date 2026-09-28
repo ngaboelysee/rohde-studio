@@ -6,15 +6,19 @@ export const metadata: Metadata = { title: "Products", robots: { index: false, f
 export const dynamic = "force-dynamic";
 
 export default async function AdminProductsPage() {
-  const products = await prisma.product.findMany({
-    include: {
-      variants: {
-        orderBy: { size: "asc" },
-        include: { inventory: true },
+  const [products, categories] = await Promise.all([
+    prisma.product.findMany({
+      include: {
+        category: true,
+        variants: {
+          orderBy: { size: "asc" },
+          include: { inventory: true },
+        },
       },
-    },
-    orderBy: { updatedAt: "desc" },
-  });
+      orderBy: { updatedAt: "desc" },
+    }),
+    prisma.category.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
+  ]);
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -31,12 +35,13 @@ export default async function AdminProductsPage() {
       </header>
 
       <AdminProductManager
+        categories={categories.map((c) => ({ slug: c.slug, label: c.label }))}
         products={products.map((p) => ({
           id: p.id,
           name: p.name,
           slug: p.slug,
           status: p.status,
-          category: p.category,
+          category: p.category.slug,
           basePrice: p.basePrice.toString(),
           currency: p.currency,
           isFeatured: p.isFeatured,

@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { ProductForm } from "@/components/admin/ProductForm";
+import type { CategoryOption } from "@/components/admin/ProductForm";
 
 type AdminVariant = {
   id: string;
@@ -33,7 +34,13 @@ type AdminProduct = {
   variants: AdminVariant[];
 };
 
-export function AdminProductManager({ products: initial }: { products: AdminProduct[] }) {
+export function AdminProductManager({
+  products: initial,
+  categories,
+}: {
+  products: AdminProduct[];
+  categories: CategoryOption[];
+}) {
   const [products, setProducts] = useState(initial);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -178,6 +185,7 @@ export function AdminProductManager({ products: initial }: { products: AdminProd
     <div>
       {formState ? (
         <ProductForm
+          categories={categories}
           initial={
             formState.mode === "edit"
               ? {

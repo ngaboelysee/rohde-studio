@@ -70,7 +70,7 @@ const TOOLS: ToolSpec[] = [
         type: "object",
         properties: {
           query: { type: "string", description: "Free-text query, e.g. 'black sweater', 'hoodie', 'dinner outfit'" },
-          category: { type: "string", description: "KNITWEAR | OUTERWEAR | TOPS | BOTTOMS | FOOTWEAR | ACCESSORIES" },
+          category: { type: "string", description: "Category slug or plain word, e.g. outerwear, knitwear, tops, bottoms, footwear, accessories (or any category shown on the storefront)" },
           maxPrice: { type: "number", description: "Maximum price in USD" },
           size: { type: "string", description: "Size letter, e.g. M" },
         },

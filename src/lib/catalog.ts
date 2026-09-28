@@ -12,21 +12,48 @@ import { BLANK_PHOTOS } from "@/lib/garment-photos";
  * value when no override exists). Loaded once per server instance — the
  * admin edits these rarely, so a momentary cache is safe and fast.
  */
-let settingsCache: Record<string, { label: string; sortOrder: number }> | null = null;
-let labelCacheAt = 0;
+/**
+ * Admin-managed categories (real table — the dashboard can add, rename,
+ * order and hide them). Cached briefly per server instance; the admin
+ * edits these rarely, so a momentary cache is safe and fast.
+ */
+export type CategoryInfo = {
+  id: string;
+  slug: string;
+  label: string;
+  sortOrder: number;
+  isActive: boolean;
+};
 
-export async function categorySettings(): Promise<Record<string, { label: string; sortOrder: number }>> {
-  if (settingsCache && Date.now() - labelCacheAt < 60_000) return settingsCache;
+let categoryCache: CategoryInfo[] | null = null;
+let categoryCacheAt = 0;
+
+export async function categoryList(): Promise<CategoryInfo[]> {
+  if (categoryCache && Date.now() - categoryCacheAt < 60_000) return categoryCache;
   try {
-    const rows = await prisma.categorySetting.findMany();
-    settingsCache = Object.fromEntries(
-      rows.map((r) => [r.category as string, { label: r.label, sortOrder: r.sortOrder }])
-    );
-    labelCacheAt = Date.now();
+    const rows = await prisma.category.findMany({
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    });
+    categoryCache = rows.map((r) => ({
+      id: r.id,
+      slug: r.slug,
+      label: r.label,
+      sortOrder: r.sortOrder,
+      isActive: r.isActive,
+    }));
+    categoryCacheAt = Date.now();
   } catch {
-    settingsCache = settingsCache ?? {};
+    categoryCache = categoryCache ?? [];
   }
-  return settingsCache;
+  return categoryCache;
+}
+
+/** Active categories as a slug → { label, sortOrder } map (storefront). */
+export async function categorySettings(): Promise<Record<string, { label: string; sortOrder: number }>> {
+  const list = await categoryList();
+  return Object.fromEntries(
+    list.filter((c) => c.isActive).map((c) => [c.slug, { label: c.label, sortOrder: c.sortOrder }])
+  );
 }
 
 export async function categoryLabels(): Promise<Record<string, string>> {
@@ -94,18 +121,18 @@ function imageFor(id: string): string {
 }
 
 const GARMENT_BY_CATEGORY: Record<string, GarmentKind> = {
-  OUTERWEAR: "JACKET",
-  KNITWEAR: "CREWNECK",
-  TOPS: "TSHIRT",
-  BOTTOMS: "TROUSER",
-  FOOTWEAR: "SNEAKER",
-  ACCESSORIES: "CAP",
+  outerwear: "JACKET",
+  knitwear: "CREWNECK",
+  tops: "TSHIRT",
+  bottoms: "TROUSER",
+  footwear: "SNEAKER",
+  accessories: "CAP",
 };
 
 const DEFAULT_GARMENT: GarmentKind = "TSHIRT";
 
-function garmentFor(category: string): GarmentKind {
-  return GARMENT_BY_CATEGORY[category] ?? DEFAULT_GARMENT;
+function garmentFor(categorySlug: string): GarmentKind {
+  return GARMENT_BY_CATEGORY[categorySlug.toLowerCase()] ?? DEFAULT_GARMENT;
 }
 
 /** Distinct colorway per product id so the grid shows a spread of shades. */
@@ -131,7 +158,7 @@ const DEMO_PRODUCTS: Array<
     id: "demo_orbit-heavy-jumper", slug: "orbit-heavy-jumper", name: "Orbit Heavy Jumper",
     description: "Flagship heavyweight jumper in 450gsm loopback cotton. Boxy body, ribbed collar, cuffs and hem.",
     story: "ORBIT 001 opens with the flagship jumper — cut boxy, printed to order in-studio.",
-    category: "KNITWEAR", basePrice: "260", currency: "USD", dropName: "ORBIT 001", isFeatured: true,
+    category: "knitwear", basePrice: "260", currency: "USD", dropName: "ORBIT 001", isFeatured: true,
     materials: ["450gsm loopback cotton", "Ribbed trims", "Boxy oversized cut"],
     photoKey: "sweatshirt",
   },
@@ -139,14 +166,14 @@ const DEMO_PRODUCTS: Array<
     id: "demo_gravity-knit-crewneck", slug: "gravity-knit-crewneck", name: "Gravity Knit Crewneck",
     description: "Heavyweight merino crew with tonal detailing. Boxy shoulders, dropped hem.",
     story: "Weight you can feel, restraint you can see.",
-    category: "KNITWEAR", basePrice: "260", currency: "USD", dropName: "ORBIT 001", isFeatured: true,
+    category: "knitwear", basePrice: "260", currency: "USD", dropName: "ORBIT 001", isFeatured: true,
     materials: ["Extra-fine merino wool", "Ribbed cuffs", "Tonal embroidery"],
   },
   {
     id: "demo_concrete-oversized-tee", slug: "concrete-oversized-tee", name: "Concrete Oversized Tee",
     description: "Boxy 240gsm jersey tee with dropped shoulders. Blank canvas for the print studio.",
     story: "Brutalist drape — the tee as architecture.",
-    category: "TOPS", basePrice: "110", currency: "USD", dropName: "ORBIT 001", isFeatured: true,
+    category: "tops", basePrice: "110", currency: "USD", dropName: "ORBIT 001", isFeatured: true,
     materials: ["240gsm cotton jersey", "Dropped shoulders", "Ribbed collar"],
     photoKey: "greyTee",
   },
@@ -154,7 +181,7 @@ const DEMO_PRODUCTS: Array<
     id: "demo_satellite-graphic-tee", slug: "satellite-graphic-tee", name: "Satellite Graphic Tee",
     description: "Classic-cut 220gsm tee — the everyday layer for the full back print.",
     story: "Every print lands where the eye already travels.",
-    category: "TOPS", basePrice: "90", currency: "USD", dropName: "ORBIT 001", isFeatured: false,
+    category: "tops", basePrice: "90", currency: "USD", dropName: "ORBIT 001", isFeatured: false,
     materials: ["220gsm cotton jersey", "Classic cut", "Print-ready"],
     photoKey: "modelTee",
   },
@@ -162,7 +189,7 @@ const DEMO_PRODUCTS: Array<
     id: "demo_eclipse-hoodie", slug: "eclipse-hoodie", name: "Eclipse Heavy Hoodie",
     description: "Heavyweight fleece hoodie, double-lined hood, kangaroo pocket.",
     story: "Made for the hours when the city is quiet.",
-    category: "KNITWEAR", basePrice: "310", currency: "USD", dropName: "ORBIT 001", isFeatured: false,
+    category: "knitwear", basePrice: "310", currency: "USD", dropName: "ORBIT 001", isFeatured: false,
     materials: ["480gsm brushed fleece", "Double-lined hood", "Kangaroo pocket"],
     photoKey: "darkHoodie",
   },
@@ -170,14 +197,14 @@ const DEMO_PRODUCTS: Array<
     id: "demo_fog-oversized-hoodie", slug: "fog-oversized-hoodie", name: "Fog Oversized Hoodie",
     description: "Heavyweight fleece hoodie, double-lined hood, kangaroo pocket.",
     story: "Made for the hours when the city is quiet.",
-    category: "KNITWEAR", basePrice: "310", currency: "USD", dropName: "ORBIT 001", isFeatured: true,
+    category: "knitwear", basePrice: "310", currency: "USD", dropName: "ORBIT 001", isFeatured: true,
     materials: ["480gsm brushed fleece", "Double-lined hood"],
   },
   {
     id: "demo_monolith-white-tee", slug: "monolith-white-tee", name: "Monolith White Tee",
     description: "The studio blank — heavyweight 260gsm tee in raw white. Print-ready.",
     story: "Architecture for the torso.",
-    category: "TOPS", basePrice: "95", currency: "USD", dropName: "ORBIT 001", isFeatured: true,
+    category: "tops", basePrice: "95", currency: "USD", dropName: "ORBIT 001", isFeatured: true,
     materials: ["260gsm cotton jersey", "Tubular body", "Tonal neck tape"],
     photoKey: "whiteTeeFlat",
   },
@@ -185,7 +212,7 @@ const DEMO_PRODUCTS: Array<
     id: "demo_studio-black-tee", slug: "studio-black-tee", name: "Studio Black Tee",
     description: "240gsm tee in deep onyx. Crew collar, straight hem, print-ready front and back.",
     story: "The quiet finale of every fit.",
-    category: "TOPS", basePrice: "105", currency: "USD", dropName: "ORBIT 001", isFeatured: false,
+    category: "tops", basePrice: "105", currency: "USD", dropName: "ORBIT 001", isFeatured: false,
     materials: ["240gsm cotton jersey", "Crew collar", "Straight hem"],
     photoKey: "blackTee",
   },
@@ -193,7 +220,7 @@ const DEMO_PRODUCTS: Array<
     id: "demo_signal-crewneck", slug: "signal-crewneck", name: "Signal Crewneck",
     description: "Midweight crewneck sweatshirt with set-in sleeves. A quiet carrier for the mark.",
     story: "Between jumper and jersey.",
-    category: "KNITWEAR", basePrice: "195", currency: "USD", dropName: "ORBIT 001", isFeatured: false,
+    category: "knitwear", basePrice: "195", currency: "USD", dropName: "ORBIT 001", isFeatured: false,
     materials: ["320gsm loopback cotton", "Set-in sleeves", "Ribbed trims"],
     photoKey: "hangingTees",
   },
@@ -205,7 +232,7 @@ function demoProduct(p: (typeof DEMO_PRODUCTS)[number]): CatalogProduct {
   const colorway = colorwayFor(p.id);
   return {
     ...p,
-    categoryLabel: p.category,
+    categoryLabel: p.category.charAt(0).toUpperCase() + p.category.slice(1),
     garment: garmentFor(p.category),
     colorway,
     image: p.photoKey ? BLANK_PHOTOS[p.photoKey] : imageFor(p.id),
@@ -233,10 +260,16 @@ export async function listProducts(options: {
   const { category, featuredOnly, search, take } = options;
 
   try {
+    let categoryId: string | undefined;
+    if (category) {
+      const cats = await categoryList();
+      categoryId = cats.find((c) => c.slug === category)?.id;
+      if (!categoryId) return { products: [], demo: false }; // unknown category slug
+    }
     const products = await prisma.product.findMany({
       where: {
         status: "ACTIVE",
-        ...(category ? { category: category as never } : {}),
+        ...(categoryId ? { categoryId } : {}),
         ...(featuredOnly ? { isFeatured: true } : {}),
         ...(search
           ? {
@@ -248,12 +281,16 @@ export async function listProducts(options: {
             }
           : {}),
       },
-      include: { variants: { where: { active: true }, orderBy: { size: "asc" }, include: { inventory: true } } },
+      include: {
+        category: true,
+        variants: { where: { active: true }, orderBy: { size: "asc" }, include: { inventory: true } },
+      },
       orderBy: { createdAt: "asc" },
       ...(take ? { take } : {}),
     });
 
-    const labels = await categoryLabels();
+    const cats = await categoryList();
+    const labelBySlug = new Map(cats.map((c) => [c.slug, c.label] as const));
 
     return {
       demo: false,
@@ -263,14 +300,14 @@ export async function listProducts(options: {
         name: p.name,
         description: p.description,
         story: p.story,
-        category: p.category,
-        categoryLabel: labels[p.category] ?? p.category,
+        category: p.category.slug,
+        categoryLabel: labelBySlug.get(p.category.slug) ?? p.category.label,
         basePrice: p.basePrice.toString(),
         currency: p.currency,
         dropName: p.dropName,
         isFeatured: p.isFeatured,
         materials: p.materials,
-        garment: garmentFor(p.category),
+        garment: garmentFor(p.category.slug),
         colorway: colorwayFor(p.id, p.variants[0]?.color),
         image: p.images[0] ?? imageFor(p.id),
         images: p.images,
@@ -310,10 +347,13 @@ export async function getProductBySlug(slug: string): Promise<CatalogProduct | n
   try {
     const p = await prisma.product.findUnique({
       where: { slug },
-      include: { variants: { where: { active: true }, orderBy: { size: "asc" }, include: { inventory: true } } },
+      include: {
+        category: true,
+        variants: { where: { active: true }, orderBy: { size: "asc" }, include: { inventory: true } },
+      },
     });
     if (!p || p.status === "DRAFT") return null;
-    const labels = await categoryLabels();
+    const label = p.category.label;
 
     return {
       id: p.id,
@@ -321,14 +361,14 @@ export async function getProductBySlug(slug: string): Promise<CatalogProduct | n
       name: p.name,
       description: p.description,
       story: p.story,
-      category: p.category,
-      categoryLabel: labels[p.category] ?? p.category,
+      category: p.category.slug,
+      categoryLabel: label,
       basePrice: p.basePrice.toString(),
       currency: p.currency,
       dropName: p.dropName,
       isFeatured: p.isFeatured,
       materials: p.materials,
-      garment: garmentFor(p.category),
+      garment: garmentFor(p.category.slug),
       colorway: colorwayFor(p.id, p.variants[0]?.color),
       image: p.images[0] ?? imageFor(p.id),
       images: p.images,

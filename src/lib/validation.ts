@@ -69,7 +69,7 @@ export const adminProductSchema = z.object({
     .or(z.literal("")),
   description: z.string().trim().min(20).max(4000),
   story: z.string().trim().max(2000).optional().or(z.literal("")),
-  category: z.enum(["OUTERWEAR", "KNITWEAR", "TOPS", "BOTTOMS", "ACCESSORIES", "FOOTWEAR"]),
+  category: z.string().min(1).max(60), // category slug — resolved server-side
   status: z.enum(["DRAFT", "ACTIVE", "ARCHIVED"]),
   basePrice: z.number().nonnegative().max(1_000_000),
   currency: z.string().length(3).default("USD"),
@@ -91,6 +91,18 @@ export const adminVariantSchema = z.object({
   color: z.string().trim().min(1).max(40),
   price: z.number().nonnegative().max(1_000_000).optional(),
   active: z.boolean().default(true),
+});
+
+export const adminCategorySchema = z.object({
+  label: z.string().trim().min(2, "Name too short").max(40, "Name too long"),
+  sortOrder: z.number().int().min(0).max(999).optional(),
+});
+
+export const adminCategoryUpdateSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().trim().min(2).max(40).optional(),
+  sortOrder: z.number().int().min(0).max(999).optional(),
+  isActive: z.boolean().optional(),
 });
 
 export const adminInventorySchema = z.object({
