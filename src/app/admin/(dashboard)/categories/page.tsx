@@ -32,6 +32,7 @@ export default async function AdminCategoriesPage() {
         categories={CATEGORY_VALUES.map((value) => ({
           value,
           label: settings.find((s) => s.category === value)?.label ?? value,
+          sortOrder: settings.find((s) => s.category === value)?.sortOrder ?? 0,
           productCount: countBy.get(value) ?? 0,
         }))}
       />

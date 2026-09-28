@@ -7,7 +7,7 @@
  */
 import { useState } from "react";
 
-type CategoryRow = { value: string; label: string; productCount: number };
+type CategoryRow = { value: string; label: string; sortOrder: number; productCount: number };
 
 export function CategoryManager({ categories: initial }: { categories: CategoryRow[] }) {
   const [rows, setRows] = useState(initial);
@@ -22,14 +22,18 @@ export function CategoryManager({ categories: initial }: { categories: CategoryR
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          labels: rows.map((r) => ({ category: r.value, label: r.label })),
+          labels: rows.map((r) => ({
+            category: r.value,
+            label: r.label.trim() || r.value,
+            sortOrder: r.sortOrder,
+          })),
         }),
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.ok) {
         throw new Error(json?.issues?.[0] ?? json?.error ?? "Save failed");
       }
-      setFeedback({ ok: true, text: "Category names saved — live on the storefront shortly." });
+      setFeedback({ ok: true, text: "Categories saved — names and order live on the storefront shortly." });
     } catch (e) {
       setFeedback({ ok: false, text: e instanceof Error ? e.message : "Save failed" });
     } finally {
@@ -56,7 +60,7 @@ export function CategoryManager({ categories: initial }: { categories: CategoryR
         {rows.map((row, i) => (
           <div
             key={row.value}
-            className={`grid grid-cols-1 items-center gap-3 px-5 py-4 sm:grid-cols-[1fr_1fr_auto] md:px-6 ${
+            className={`grid grid-cols-1 items-center gap-3 px-5 py-4 sm:grid-cols-[1fr_1fr_5rem_auto] md:px-6 ${
               i > 0 ? "border-t border-white/5" : ""
             }`}
           >
@@ -91,6 +95,31 @@ export function CategoryManager({ categories: initial }: { categories: CategoryR
                 className="min-h-11 w-full border border-white/15 bg-transparent px-4 text-sm text-charcoal transition-colors duration-200 focus:border-brass focus:outline-none"
               />
             </div>
+            <div>
+              <label
+                htmlFor={`cat-order-${row.value}`}
+                className="mb-2 block text-[11px] font-semibold uppercase tracking-widest2 text-concrete"
+              >
+                Order
+              </label>
+              <input
+                id={`cat-order-${row.value}`}
+                type="number"
+                min={0}
+                max={999}
+                value={row.sortOrder}
+                onChange={(e) =>
+                  setRows((prev) =>
+                    prev.map((r) =>
+                      r.value === row.value
+                        ? { ...r, sortOrder: Math.max(0, Math.min(999, Number(e.target.value) || 0)) }
+                        : r
+                    )
+                  )
+                }
+                className="min-h-11 w-full border border-white/15 bg-transparent px-3 text-center font-mono text-sm text-charcoal transition-colors duration-200 focus:border-brass focus:outline-none"
+              />
+            </div>
           </div>
         ))}
 
@@ -101,7 +130,7 @@ export function CategoryManager({ categories: initial }: { categories: CategoryR
             disabled={busy}
             className="min-h-11 border border-brass/50 px-8 text-[11px] font-semibold uppercase tracking-widest2 text-brass transition-colors duration-200 hover:bg-brass hover:text-bone-deep disabled:opacity-40"
           >
-            {busy ? "Saving…" : "Save category names"}
+            {busy ? "Saving…" : "Save categories"}
           </button>
         </div>
       </div>

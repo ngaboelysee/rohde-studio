@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { listProducts, categoryLabels } from "@/lib/catalog";
+import { listProducts, categorySettings } from "@/lib/catalog";
 import { pageMetadata } from "@/lib/seo";
 import { ProductCard } from "@/components/product/ProductCard";
 import { RevealText } from "@/components/motion/RevealText";
@@ -65,10 +65,16 @@ export default async function ProductsPage({
   searchParams: Promise<SearchParams>;
 }) {
   const { category } = await searchParams;
-  const labels = await categoryLabels();
+  const settings = await categorySettings();
   const CATEGORIES = [
     { key: "", label: "All" },
-    ...CATEGORY_KEYS.map((k) => ({ key: k, label: labels[k] ?? k })),
+    ...CATEGORY_KEYS.map((k) => ({ key: k, label: settings[k]?.label ?? k }))
+      // Admin-defined order (ascending), enum order as tiebreak
+      .sort((a, b) => {
+        const oa = settings[a.key]?.sortOrder ?? 0;
+        const ob = settings[b.key]?.sortOrder ?? 0;
+        return oa - ob;
+      }),
   ];
 
   return (

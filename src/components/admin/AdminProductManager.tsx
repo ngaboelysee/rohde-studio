@@ -15,6 +15,7 @@ type AdminVariant = {
   sku: string;
   size: string;
   color: string;
+  image: string | null;
   onHand: number;
   reserved: number;
 };
@@ -67,6 +68,54 @@ export function AdminProductManager({ products: initial }: { products: AdminProd
         }))
       );
       flash(`Stock saved for ${key.split("-").pop()}`);
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Update failed", false);
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function uploadVariantPhoto(variantId: string, file: File, key: string) {
+    setBusyKey(key);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("variantId", variantId);
+      const res = await fetch("/api/admin/upload", { method: "POST", body });
+      if (res.status === 404) throw new Error("Access revoked — sign in again");
+      if (!res.ok) throw new Error("Upload failed");
+      const json = await res.json().catch(() => null);
+      const url = typeof json?.url === "string" ? json.url : null;
+      setProducts((prev) =>
+        prev.map((p) => ({
+          ...p,
+          variants: p.variants.map((v) => (v.id === variantId ? { ...v, image: url } : v)),
+        }))
+      );
+      flash("Colour photo saved — live on the product page");
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Upload failed", false);
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function clearVariantPhoto(variantId: string, key: string) {
+    setBusyKey(key);
+    try {
+      const res = await fetch("/api/admin/variants", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ variantId, image: null }),
+      });
+      if (!res.ok) throw new Error("Update failed");
+      setProducts((prev) =>
+        prev.map((p) => ({
+          ...p,
+          variants: p.variants.map((v) => (v.id === variantId ? { ...v, image: null } : v)),
+        }))
+      );
+      flash("Colour photo cleared");
     } catch (e) {
       flash(e instanceof Error ? e.message : "Update failed", false);
     } finally {
@@ -153,8 +202,7 @@ export function AdminProductManager({ products: initial }: { products: AdminProd
       ) : null}
 
       <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
-        <p className="text-sm text-concrete">
-          {products.length} product{products.length === 1 ? "" : "s"} in the catalog
+        <p className="text-sm text-concrete">                    {products.length} product{products.length === 1 ? "" : "s"} in the catalog
         </p>
         <button
           type="button"
@@ -230,10 +278,10 @@ export function AdminProductManager({ products: initial }: { products: AdminProd
               {/* Variants table */}
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[640px] text-sm">
-                  <caption className="sr-only">Inventory for {product.name}</caption>
+                  <caption className="sr-only">Inventory and colour photos for {product.name}</caption>
                   <thead>
                     <tr className="border-b border-white/10 text-left">
-                      {["SKU", "Size", "Color", "On hand", "Reserved", "Available", ""].map((h, i) => (
+                      {["SKU", "Size", "Color", "Colour photo", "On hand", "Reserved", "Available", ""].map((h, i) => (
                         <th key={i} scope="col" className="px-4 py-3 md:px-6">
                           <span className="label-rohde font-semibold">{h}</span>
                         </th>
@@ -250,6 +298,54 @@ export function AdminProductManager({ products: initial }: { products: AdminProd
                           <td className="px-4 py-3 font-mono text-xs text-concrete md:px-6">{variant.sku}</td>
                           <td className="px-4 py-3 text-charcoal">{variant.size}</td>
                           <td className="px-4 py-3 text-concrete">{variant.color}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              {variant.image ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={variant.image}
+                                  alt={`Photo for ${variant.color}`}
+                                  className="h-10 w-10 border border-white/15 object-cover"
+                                />
+                              ) : (
+                                <span className="flex h-10 w-10 items-center justify-center border border-dashed border-white/20 text-[9px] text-concrete/50">
+                                  none
+                                </span>
+                              )}
+                              <div className="flex flex-col gap-1">
+                                <label
+                                  className={`inline-flex cursor-pointer items-center text-[10px] uppercase tracking-widest2 transition-colors duration-200 ${
+                                    busyKey === key
+                                      ? "text-concrete/50"
+                                      : "text-concrete hover:text-brass"
+                                  }`}
+                                >
+                                  <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp,image/avif"
+                                    className="sr-only"
+                                    disabled={busyKey === key}
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) uploadVariantPhoto(variant.id, file, key);
+                                      e.target.value = "";
+                                    }}
+                                  />
+                                  {busyKey === key ? "···" : "Upload"}
+                                </label>
+                                {variant.image ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => clearVariantPhoto(variant.id, key)}
+                                    disabled={busyKey === key}
+                                    className="text-left text-[10px] uppercase tracking-widest2 text-concrete/60 transition-colors duration-200 hover:text-red-300"
+                                  >
+                                    Clear
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+                          </td>
                           <td className="px-4 py-3">
                             <label className="sr-only" htmlFor={`stock-${variant.id}`}>
                               Stock for {variant.sku}

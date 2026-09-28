@@ -24,7 +24,9 @@ export default async function AdminProductsPage() {
           Products &amp; inventory
         </h1>
         <p className="mt-2 text-sm text-concrete">
-          Stock changes save instantly and are audit-logged. Uploads go to the private studio storage.
+          Stock changes save instantly and are audit-logged. Upload a photo per colour so every
+          colourway shows its own photograph on the product page; campaign images feed the
+          product card and the lookbook grid.
         </p>
       </header>
 
@@ -44,6 +46,7 @@ export default async function AdminProductsPage() {
             sku: v.sku,
             size: v.size,
             color: v.color,
+            image: v.image,
             onHand: v.inventory?.onHand ?? 0,
             reserved: v.inventory?.reserved ?? 0,
           })),

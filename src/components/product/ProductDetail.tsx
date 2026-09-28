@@ -25,6 +25,21 @@ function usesPhotoStage(product: CatalogProduct): boolean {
   return product.garment === "CREWNECK" || product.garment === "HOODIE" || product.garment === "TSHIRT";
 }
 
+/** Map a free-text variant colour name ("Charcoal", "Off-White"…) to the
+ *  nearest display fabric so photography and swatches stay coherent. */
+function fabricForColorName(name: string): FabricName {
+  const n = name.toLowerCase();
+  if (/charcoal|black|onyx|ink|graphite/.test(n)) return "Onyx";
+  if (/white|bone|ecru|ivory|cream|off-?white/.test(n)) return "Bone";
+  if (/grey|gray|concrete|stone|ash/.test(n)) return "Concrete";
+  if (/rust|ember|terracotta|clay|brown/.test(n)) return "Ember";
+  if (/moss|olive|green/.test(n)) return "Moss";
+  if (/cobalt|blue|navy/.test(n)) return "Cobalt";
+  if (/plum|purple|aubergine/.test(n)) return "Plum";
+  if (/sand|tan|beige|camel/.test(n)) return "Sand";
+  return "Onyx";
+}
+
 function Accordion({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -78,7 +93,28 @@ export function ProductDetail({ product }: { product: CatalogProduct }) {
   const totalAvailable = variants.reduce((sum, v) => sum + v.available, 0);
   const photoStage = usesPhotoStage(product);
   const fabricName = (colorway in FABRICS ? colorway : "Onyx") as FabricName;
-  const photo = HERO_JUMPER_PHOTOS[fabricName as keyof typeof HERO_JUMPER_PHOTOS] ?? BLANK_PHOTOS.whiteTeeFlat;
+
+  /** Photo for the selected colour: admin-uploaded colour photo wins, then
+   *  the editorial campaign set, then the verified blank-garment fallback. */
+  const selectedColor = selected?.color ?? colorway;
+  const colorPhoto = (c: string): string => {
+    const uploaded = product.colorPhotoMap[c];
+    if (uploaded) return uploaded;
+    const campaign = product.images[0];
+    if (campaign) return campaign;
+    return HERO_JUMPER_PHOTOS[fabricName as keyof typeof HERO_JUMPER_PHOTOS] ?? BLANK_PHOTOS.whiteTeeFlat;
+  };
+  const photo = colorPhoto(selectedColor);
+  /** Real photography renders untouched — never tinted by the fabric filter. */
+  const usingRealPhoto = Boolean(product.colorPhotoMap[selectedColor]) || product.images.length > 0;
+  const mockupFabric = usingRealPhoto ? { ...FABRICS[fabricName], filter: "none" } : FABRICS[fabricName];
+
+  // Keep the display fabric in step with the selected variant's colour name
+  // ("Charcoal" → Onyx, "Off-White" → Bone…) so swatches and photography agree.
+  useEffect(() => {
+    if (selected) setColorway(fabricForColorName(selected.color));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
 
   useEffect(() => {
     trackEvent("product_viewed", {
@@ -136,6 +172,10 @@ export function ProductDetail({ product }: { product: CatalogProduct }) {
   }
 
   const allSoldOut = totalAvailable <= 0;
+  const distinctColors = useMemo(
+    () => Array.from(new Set(variants.map((v) => v.color))),
+    [variants]
+  );
 
   return (
     <article className="relative pb-24 lg:pb-0">
@@ -146,7 +186,7 @@ export function ProductDetail({ product }: { product: CatalogProduct }) {
             {photoStage ? (
               <GarmentMockup
                 photo={photo}
-                fabric={FABRICS[fabricName]}
+                fabric={mockupFabric}
                 placement={custom?.placement ?? "center"}
                 scale={custom?.scale}
                 ink={custom?.ink ?? "auto"}
@@ -157,31 +197,61 @@ export function ProductDetail({ product }: { product: CatalogProduct }) {
               <GarmentStage garment={product.garment} colorway={colorway} />
             )}
             <span className="absolute left-5 top-5 font-mono text-[9px] uppercase tracking-wider2 text-concrete-dim">
-              {custom ? "Print preview" : "Blank garment"}
+              {custom ? "Print preview" : product.colorPhotoMap[colorway] ? "Studio photograph" : "Blank garment"}
             </span>
           </div>
+
+          {/* Campaign gallery — admin-uploaded editorial photography */}
+          {product.images.length > 0 ? (
+            <div className="container-rohde mt-4 grid grid-cols-3 gap-3 lg:px-12">
+              {product.images.slice(0, 6).map((src, i) => (
+                <div key={src} className="relative aspect-square overflow-hidden bg-bone-deep">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={src}
+                    alt={`${product.name} — look ${i + 1}`}
+                    loading="lazy"
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+              ))}
+            </div>
+          ) : null}
 
           {/* Fabric — product colour, the one permitted accent */}
           <div className="container-rohde mt-6 lg:px-12">
             <div className="flex items-center gap-4">
-              <span className="label-rohde">Colour — {FABRICS[fabricName].label}</span>
+              <span className="label-rohde">
+                Colour — {selected ? selected.color : FABRICS[fabricName].label}
+              </span>
               <div className="flex flex-wrap gap-2.5">
-                {(Object.keys(COLORWAYS) as Array<keyof typeof COLORWAYS>).map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    aria-pressed={colorway === c}
-                    aria-label={`View in ${FABRICS[c].label}`}
-                    onClick={() => {
-                      setColorway(c);
-                      setCustom((prev) => (prev ? { ...prev, fabric: c as FabricName } : null));
-                    }}
-                    className={`h-7 w-7 rounded-full border transition-all duration-200 ${
-                      colorway === c ? "border-charcoal" : "border-charcoal/20 hover:border-brass"
-                    }`}
-                    style={{ backgroundColor: FABRICS[c].hex }}
-                  />
-                ))}
+                {distinctColors.map((c) => {
+                  const swatchFabric = fabricForColorName(c);
+                  const active = selected ? selected.color === c : colorway === swatchFabric;
+                  const firstOfColor =
+                    variants.find((v) => v.color === c && v.available > 0) ??
+                    variants.find((v) => v.color === c);
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      aria-pressed={active}
+                      aria-label={`View in ${c}`}
+                      disabled={!firstOfColor}
+                      onClick={() => {
+                        if (!firstOfColor) return;
+                        setSelectedId(firstOfColor.id);
+                        setNotice(null);
+                        setCustom((prev) => (prev ? { ...prev, fabric: swatchFabric } : null));
+                      }}
+                      title={product.colorPhotoMap[c] ? `${c} — studio photograph` : c}
+                      className={`h-7 w-7 rounded-full border transition-all duration-200 disabled:opacity-40 ${
+                        active ? "border-charcoal" : "border-charcoal/20 hover:border-brass"
+                      }`}
+                      style={{ backgroundColor: FABRICS[swatchFabric].hex }}
+                    />
+                  );
+                })}
               </div>
             </div>
           </div>

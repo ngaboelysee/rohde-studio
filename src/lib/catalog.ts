@@ -12,19 +12,26 @@ import { BLANK_PHOTOS } from "@/lib/garment-photos";
  * value when no override exists). Loaded once per server instance — the
  * admin edits these rarely, so a momentary cache is safe and fast.
  */
-let labelCache: Record<string, string> | null = null;
+let settingsCache: Record<string, { label: string; sortOrder: number }> | null = null;
 let labelCacheAt = 0;
 
-export async function categoryLabels(): Promise<Record<string, string>> {
-  if (labelCache && Date.now() - labelCacheAt < 60_000) return labelCache;
+export async function categorySettings(): Promise<Record<string, { label: string; sortOrder: number }>> {
+  if (settingsCache && Date.now() - labelCacheAt < 60_000) return settingsCache;
   try {
     const rows = await prisma.categorySetting.findMany();
-    labelCache = Object.fromEntries(rows.map((r) => [r.category as string, r.label]));
+    settingsCache = Object.fromEntries(
+      rows.map((r) => [r.category as string, { label: r.label, sortOrder: r.sortOrder }])
+    );
     labelCacheAt = Date.now();
   } catch {
-    labelCache = labelCache ?? {};
+    settingsCache = settingsCache ?? {};
   }
-  return labelCache;
+  return settingsCache;
+}
+
+export async function categoryLabels(): Promise<Record<string, string>> {
+  const settings = await categorySettings();
+  return Object.fromEntries(Object.entries(settings).map(([k, v]) => [k, v.label]));
 }
 
 export async function categoryLabel(value: string): Promise<string> {
@@ -48,6 +55,8 @@ export type CatalogVariant = {
   color: string;
   price: string | null;
   available: number;
+  /** Admin-uploaded photo for this specific colour (null = editorial fallback). */
+  photo: string | null;
 };
 
 export type CatalogProduct = {
@@ -69,6 +78,10 @@ export type CatalogProduct = {
   colorway: string;
   /** Editorial clothing photo (verified-live URL) for cards/grids. */
   image: string;
+  /** Admin-uploaded campaign/gallery photos in order (may be empty). */
+  images: string[];
+  /** Colour name → admin-uploaded photo for that colour. */
+  colorPhotoMap: Record<string, string>;
   variants: CatalogVariant[];
 };
 
@@ -196,6 +209,8 @@ function demoProduct(p: (typeof DEMO_PRODUCTS)[number]): CatalogProduct {
     garment: garmentFor(p.category),
     colorway,
     image: p.photoKey ? BLANK_PHOTOS[p.photoKey] : imageFor(p.id),
+    images: [],
+    colorPhotoMap: {},
     variants: DEMO_SIZES.map((size, i) => ({
       id: `${p.id}_v${i}`,
       sku: `${p.id.slice(5).toUpperCase().slice(0, 12)}-${size}`,
@@ -204,6 +219,7 @@ function demoProduct(p: (typeof DEMO_PRODUCTS)[number]): CatalogProduct {
       price: null,
       // Deterministic stock so sold-out / low-stock states are visible too.
       available: (p.id.length * 7 + i * 3) % 9,
+      photo: null,
     })),
   };
 }
@@ -256,7 +272,13 @@ export async function listProducts(options: {
         materials: p.materials,
         garment: garmentFor(p.category),
         colorway: colorwayFor(p.id, p.variants[0]?.color),
-        image: imageFor(p.id),
+        image: p.images[0] ?? imageFor(p.id),
+        images: p.images,
+        colorPhotoMap: Object.fromEntries(
+          p.variants
+            .filter((v): v is typeof v & { image: string } => Boolean(v.image))
+            .map((v) => [v.color, v.image])
+        ),
         variants: p.variants.map((v) => ({
           id: v.id,
           sku: v.sku,
@@ -264,6 +286,7 @@ export async function listProducts(options: {
           color: v.color,
           price: v.price ? v.price.toString() : null,
           available: v.inventory ? Math.max(0, v.inventory.onHand - v.inventory.reserved) : 0,
+          photo: v.image ?? null,
         })),
       })),
     };
@@ -307,7 +330,13 @@ export async function getProductBySlug(slug: string): Promise<CatalogProduct | n
       materials: p.materials,
       garment: garmentFor(p.category),
       colorway: colorwayFor(p.id, p.variants[0]?.color),
-      image: imageFor(p.id),
+      image: p.images[0] ?? imageFor(p.id),
+      images: p.images,
+      colorPhotoMap: Object.fromEntries(
+        p.variants
+          .filter((v): v is typeof v & { image: string } => Boolean(v.image))
+          .map((v) => [v.color, v.image])
+      ),
       variants: p.variants.map((v) => ({
         id: v.id,
         sku: v.sku,
@@ -315,6 +344,7 @@ export async function getProductBySlug(slug: string): Promise<CatalogProduct | n
         color: v.color,
         price: v.price ? v.price.toString() : null,
         available: v.inventory ? Math.max(0, v.inventory.onHand - v.inventory.reserved) : 0,
+        photo: v.image ?? null,
       })),
     };
   } catch (error) {

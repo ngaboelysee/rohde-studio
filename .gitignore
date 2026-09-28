@@ -42,3 +42,6 @@ yarn-error.log*
 # Local AI-assistant tooling
 .agents/
 skills-lock.json
+
+.vercel
+.env*
