@@ -2,10 +2,14 @@
 
 /**
  * Checkout — guest-first, no login required. Validates with Zod, submits to
- * /api/checkout (server re-validates + re-checks inventory), redirects to the
- * gateway or confirmation.
+ * /api/checkout (server re-validates + re-prices + re-checks inventory).
+ *
+ * WhatsApp channel: the server creates a PENDING order with reserved stock
+ * and returns a wa.me deep link pre-filled with the order summary — the
+ * customer never copies a number and never sees receiving-account details.
+ * Totals shown here are informational; the server computes the real ones.
  */
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { checkoutSchema } from "@/lib/validation";
@@ -13,8 +17,25 @@ import { useCartStore } from "@/stores/cart-store";
 import { formatPrice } from "@/lib/format";
 import { trackEvent } from "@/lib/analytics/events";
 
-const PAYMENTS = [
-  { id: "MOBILE_MONEY", label: "Mobile Money", hint: "MTN · Airtel" },
+type StoreConfig = {
+  whatsappEnabled: boolean;
+  whatsappNumber: string;
+  localCurrency: string;
+  usdToLocalRate: number;
+  deliveryAreas: { name: string; fee: number; estimate: string }[];
+  reservationMinutes: number;
+};
+
+type WaResult = {
+  orderNumber: string;
+  whatsappUrl: string;
+  expiresAt: string;
+  total: number;
+  currency: string;
+  estimate: string;
+};
+
+const CARD_PAYMENTS = [
   { id: "PAYSTACK", label: "Paystack", hint: "Cards & bank" },
   { id: "FLUTTERWAVE", label: "Flutterwave", hint: "Cards, Africa corridors" },
   { id: "STRIPE", label: "Stripe", hint: "Visa · Mastercard · Amex" },
@@ -26,9 +47,40 @@ export default function CheckoutPage() {
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [config, setConfig] = useState<StoreConfig | null>(null);
+  const [provider, setProvider] = useState<string>("WHATSAPP");
+  const [areaName, setAreaName] = useState<string>("");
+  const [waResult, setWaResult] = useState<WaResult | null>(null);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/store-config");
+        if (!res.ok) return;
+        const json = (await res.json()) as { config: StoreConfig };
+        setConfig(json.config);
+        if (json.config.whatsappEnabled) {
+          setProvider("WHATSAPP");
+          setAreaName(json.config.deliveryAreas[0]?.name ?? "");
+        } else {
+          setProvider("STRIPE");
+        }
+      } catch {
+        // config unavailable → gateway-only checkout still works
+      }
+    })();
+  }, []);
+
+  const isWa = provider === "WHATSAPP" && !!config?.whatsappEnabled;
   const total = subtotal();
   const currency = lines[0]?.currency ?? "USD";
+
+  const area = useMemo(
+    () => config?.deliveryAreas.find((a) => a.name === areaName) ?? config?.deliveryAreas[0] ?? null,
+    [config, areaName]
+  );
+  const localSubtotal = isWa && config ? Math.round(total * config.usdToLocalRate) : 0;
+  const localTotal = isWa && config ? localSubtotal + (area?.fee ?? 0) : 0;
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -45,7 +97,9 @@ export default function CheckoutPage() {
       region: String(fd.get("region") ?? ""),
       postalCode: String(fd.get("postalCode") ?? ""),
       country: String(fd.get("country") ?? "").toUpperCase(),
-      provider: String(fd.get("provider") ?? "STRIPE"),
+      provider,
+      deliveryArea: isWa ? areaName : "",
+      deliveryInstructions: String(fd.get("deliveryInstructions") ?? ""),
     };
 
     const parsed = checkoutSchema.safeParse(raw);
@@ -55,7 +109,12 @@ export default function CheckoutPage() {
         const key = issue.path[0];
         if (typeof key === "string" && !errors[key]) errors[key] = issue.message;
       }
+      if (isWa && !areaName) errors.deliveryArea = "Choose a delivery area";
       setFieldErrors(errors);
+      return;
+    }
+    if (isWa && !area) {
+      setFieldErrors({ deliveryArea: "Choose a delivery area" });
       return;
     }
     setFieldErrors({});
@@ -75,11 +134,36 @@ export default function CheckoutPage() {
           items: lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
         }),
       });
-      const json = (await res.json()) as { ok?: boolean; redirectUrl?: string | null; orderNumber?: string; error?: string };
+      const json = (await res.json()) as {
+        ok?: boolean;
+        channel?: string;
+        redirectUrl?: string | null;
+        orderNumber?: string;
+        whatsappUrl?: string;
+        expiresAt?: string;
+        error?: string;
+      };
 
       if (!res.ok || !json.ok) {
         setServerError(json.error ?? "Checkout failed. Please try again.");
         setSubmitting(false);
+        return;
+      }
+
+      if (json.channel === "whatsapp" && json.whatsappUrl) {
+        trackEvent("checkout_started", { method: "whatsapp", order_id: json.orderNumber });
+        setWaResult({
+          orderNumber: json.orderNumber ?? "",
+          whatsappUrl: json.whatsappUrl,
+          expiresAt: json.expiresAt ?? "",
+          total: localTotal,
+          currency: config?.localCurrency ?? "RWF",
+          estimate: area?.estimate ?? "1–2 business days",
+        });
+        clear();
+        setSubmitting(false);
+        // Open WhatsApp with the pre-filled order summary.
+        window.location.assign(json.whatsappUrl);
         return;
       }
 
@@ -99,6 +183,34 @@ export default function CheckoutPage() {
       setServerError("Network error — please try again.");
       setSubmitting(false);
     }
+  }
+
+  if (waResult) {
+    return (
+      <div className="container-rohde flex min-h-[60vh] flex-col items-center justify-center py-20 text-center">
+        <p className="label-rohde">Almost done</p>
+        <h1 className="heading-rohde mt-3 max-w-xl text-3xl md:text-4xl">
+          Finish order #{waResult.orderNumber} on WhatsApp
+        </h1>
+        <p className="mt-4 max-w-md text-sm text-concrete-dim">
+          WhatsApp should have opened with your order summary. Send the message to receive payment
+          instructions. Your items are reserved for {config?.reservationMinutes ?? 30} minutes.
+        </p>
+        {waResult.total > 0 ? (
+          <p className="mt-3 font-mono text-sm">
+            Order total: {formatPrice(waResult.total, waResult.currency)} · Delivery {waResult.estimate.toLowerCase()}
+          </p>
+        ) : null}
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
+          <a href={waResult.whatsappUrl} className="btn-charcoal">
+            Reopen WhatsApp
+          </a>
+          <Link href="/products" className="font-mono text-xs uppercase tracking-wider text-concrete underline-offset-4 hover:text-charcoal hover:underline">
+            Continue shopping
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   if (lines.length === 0) {
@@ -141,11 +253,11 @@ export default function CheckoutPage() {
             <h2 className="label-rohde">01 — Contact</h2>
             {field("email", "Email", { type: "email", autoComplete: "email", required: true })}
             {field("fullName", "Full name", { autoComplete: "name", required: true })}
-            {field("phone", "Phone", { type: "tel", autoComplete: "tel", required: true, placeholder: "+250 781 214 230" })}
+            {field("phone", "Phone (WhatsApp)", { type: "tel", autoComplete: "tel", required: true, placeholder: "+250 781 214 230" })}
           </section>
 
-          <section aria-label="Shipping address" className="mt-10 space-y-5">
-            <h2 className="label-rohde">02 — Shipping</h2>
+          <section aria-label="Delivery details" className="mt-10 space-y-5">
+            <h2 className="label-rohde">02 — Delivery</h2>
             {field("line1", "Address line 1", { autoComplete: "address-line1", required: true })}
             {field("line2", "Address line 2 (optional)", { autoComplete: "address-line2" })}
             <div className="grid gap-5 sm:grid-cols-2">
@@ -154,17 +266,77 @@ export default function CheckoutPage() {
               {field("postalCode", "Postal code", { autoComplete: "postal-code" })}
               {field("country", "Country code", { autoComplete: "country-code", placeholder: "RW", maxLength: 2, required: true })}
             </div>
+            {isWa && config ? (
+              <>
+                <div>
+                  <label htmlFor="deliveryArea" className="label-rohde mb-2 block">Delivery area</label>
+                  <select
+                    id="deliveryArea"
+                    name="deliveryArea"
+                    value={areaName}
+                    onChange={(e) => setAreaName(e.target.value)}
+                    className="w-full border border-charcoal/25 bg-transparent px-4 py-3 text-sm transition-colors duration-300 focus:border-brass focus:outline-none"
+                    required
+                  >
+                    {config.deliveryAreas.map((a) => (
+                      <option key={a.name} value={a.name}>
+                        {a.name} — {formatPrice(a.fee, config.localCurrency)} · {a.estimate}
+                      </option>
+                    ))}
+                  </select>
+                  {fieldErrors.deliveryArea ? (
+                    <p role="alert" className="mt-1.5 font-mono text-[10px] text-error">{fieldErrors.deliveryArea}</p>
+                  ) : null}
+                </div>
+                <div>
+                  <label htmlFor="deliveryInstructions" className="label-rohde mb-2 block">Delivery instructions (optional)</label>
+                  <textarea
+                    id="deliveryInstructions"
+                    name="deliveryInstructions"
+                    rows={2}
+                    maxLength={300}
+                    placeholder="Landmark, gate, best time to deliver…"
+                    className="w-full border border-charcoal/25 bg-transparent px-4 py-3 text-sm placeholder:text-concrete transition-colors duration-300 focus:border-brass focus:outline-none"
+                  />
+                </div>
+              </>
+            ) : null}
           </section>
 
           <fieldset className="mt-10">
             <legend className="label-rohde">03 — Payment</legend>
             <div className="mt-4 space-y-2">
-              {PAYMENTS.map((p) => (
+              {config?.whatsappEnabled ? (
+                <label
+                  className="flex cursor-pointer items-center gap-4 border border-brass/60 bg-brass/[0.05] px-5 py-3.5 transition-colors duration-300 hover:border-brass has-[:checked]:border-brass has-[:checked]:bg-brass/[0.08]"
+                >
+                  <input
+                    type="radio"
+                    name="provider"
+                    value="WHATSAPP"
+                    checked={provider === "WHATSAPP"}
+                    onChange={() => setProvider("WHATSAPP")}
+                    className="accent-charcoal"
+                  />
+                  <span className="flex-1">
+                    <span className="block text-sm font-semibold uppercase tracking-wide">Mobile Money via WhatsApp</span>
+                    <span className="label-rohde mt-0.5 block">MTN · Airtel — pay after chat confirmation</span>
+                  </span>
+                </label>
+              ) : null}
+              {CARD_PAYMENTS.map((p) => (
                 <label
                   key={p.id}
                   className="flex cursor-pointer items-center gap-4 border border-charcoal/20 px-5 py-3.5 transition-colors duration-300 hover:border-brass/60 has-[:checked]:border-brass has-[:checked]:bg-brass/[0.05]"
                 >
-                  <input type="radio" name="provider" value={p.id} defaultChecked={p.id === "STRIPE"} className="accent-charcoal" />
+                  <input
+                    type="radio"
+                    name="provider"
+                    value={p.id}
+                    checked={provider === p.id}
+                    onChange={() => setProvider(p.id)}
+                    className="accent-charcoal"
+                  />
                   <span className="flex-1">
                     <span className="block text-sm font-semibold uppercase tracking-wide">{p.label}</span>
                     <span className="label-rohde mt-0.5 block">{p.hint}</span>
@@ -181,8 +353,17 @@ export default function CheckoutPage() {
           ) : null}
 
           <button type="submit" disabled={submitting} className="btn-charcoal mt-10 w-full !py-4">
-            {submitting ? "Processing…" : `Pay ${formatPrice(total, currency)}`}
+            {submitting
+              ? "Processing…"
+              : isWa
+                ? "Complete Order on WhatsApp"
+                : `Pay ${formatPrice(total, currency)}`}
           </button>
+          {isWa ? (
+            <p className="mt-3 text-center font-mono text-[10px] text-concrete">
+              WhatsApp opens with your order summary — payment instructions follow in chat.
+            </p>
+          ) : null}
         </form>
 
         {/* Order summary */}
@@ -201,10 +382,32 @@ export default function CheckoutPage() {
             ))}
           </ul>
           <div className="mt-4 space-y-2 border-t border-charcoal/10 pt-5 font-mono text-sm">
-            <div className="flex justify-between"><span className="text-concrete-dim">Shipping</span><span>Included</span></div>
-            <div className="flex justify-between border-t border-charcoal/10 pt-3 text-base font-medium">
-              <span>Total</span><span>{formatPrice(total, currency)}</span>
-            </div>
+            {isWa && config ? (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-concrete-dim">Subtotal</span>
+                  <span>{formatPrice(localSubtotal, config.localCurrency)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-concrete-dim">Delivery{area ? ` — ${area.name}` : ""}</span>
+                  <span>{formatPrice(area?.fee ?? 0, config.localCurrency)}</span>
+                </div>
+                <div className="flex justify-between border-t border-charcoal/10 pt-3 text-base font-medium">
+                  <span>Total</span>
+                  <span>{formatPrice(localTotal, config.localCurrency)}</span>
+                </div>
+                {area ? (
+                  <p className="pt-1 font-mono text-[10px] text-concrete">Estimated delivery: {area.estimate}</p>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between"><span className="text-concrete-dim">Shipping</span><span>Included</span></div>
+                <div className="flex justify-between border-t border-charcoal/10 pt-3 text-base font-medium">
+                  <span>Total</span><span>{formatPrice(total, currency)}</span>
+                </div>
+              </>
+            )}
           </div>
         </aside>
       </div>

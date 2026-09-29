@@ -41,7 +41,11 @@ export const checkoutSchema = z.object({
   region: z.string().trim().max(80).optional().or(z.literal("")),
   postalCode: z.string().trim().max(20).optional().or(z.literal("")),
   country: z.string().trim().length(2, "Use a 2-letter country code"),
-  provider: z.enum(["STRIPE", "PAYSTACK", "FLUTTERWAVE", "MOBILE_MONEY"]),
+  provider: z.enum(["STRIPE", "PAYSTACK", "FLUTTERWAVE", "MOBILE_MONEY", "WHATSAPP"]),
+  /** WhatsApp checkout: chosen delivery area name (fee resolved server-side). */
+  deliveryArea: z.string().trim().max(80).optional().or(z.literal("")),
+  /** WhatsApp checkout: landmark / delivery instructions. */
+  deliveryInstructions: z.string().trim().max(300).optional().or(z.literal("")),
 });
 
 export const cartLineSchema = z.object({

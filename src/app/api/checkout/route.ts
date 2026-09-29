@@ -10,10 +10,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkoutSubmitSchema } from "@/lib/validation";
 import { sanitizeEmail, sanitizeText } from "@/lib/sanitize";
-import { assertStock, reserveStock, releaseStock, InventoryError } from "@/lib/inventory";
+import { assertStock, reserveStock, releaseStock, releaseExpiredReservations, InventoryError } from "@/lib/inventory";
 import { selectGateway, gatewayCurrencyAllowed, demoConvert } from "@/lib/payments/gateway";
 import { initProviderPayment } from "@/lib/payments/adapters";
 import { getCustomer } from "@/lib/auth";
+import { getStoreSettings } from "@/lib/store-settings";
+import { normalizePhone, composeOrderMessage } from "@/lib/whatsapp";
 
 function generateOrderNumber(): string {
   const rand = Math.floor(Math.random() * 1_000_000)
@@ -38,6 +40,12 @@ export async function POST(req: Request): Promise<NextResponse> {
 
     const { customer, items } = parsed.data;
     lines = items;
+
+    // Lazy TTL sweep: return long-expired reservations to the pool first so
+    // availability is accurate at the moment this order reserves (Vercel
+    // Hobby only allows daily crons, so checkout itself is the primary
+    // trigger). Idempotent + concurrency-safe.
+    await releaseExpiredReservations().catch(() => undefined);
 
     // Server-side pricing: recompute from the database, never trust client prices.
     const variantIds = items.map((i) => i.variantId);
@@ -72,6 +80,111 @@ export async function POST(req: Request): Promise<NextResponse> {
         return NextResponse.json({ error: "Currency not supported for this gateway." }, { status: 400 });
       }
     }
+
+    // ─── WhatsApp checkout path ───────────────────────────────────────────
+    if (customer.provider === "WHATSAPP") {
+      const settings = await getStoreSettings();
+      if (!settings.whatsappEnabled) {
+        return NextResponse.json({ error: "WhatsApp checkout is currently unavailable." }, { status: 503 });
+      }
+      const area =
+        settings.deliveryAreas.find((a) => a.name === customer.deliveryArea) ??
+        settings.deliveryAreas[0] ??
+        { name: "Standard delivery", fee: 0, estimate: "1–2 business days" };
+
+      // Server-side money: convert catalog currency → local MoMo currency.
+      const rate = settings.usdToLocalRate;
+      const localSubtotal = Math.round(subtotal * rate);
+      const localShipping = area.fee;
+      const localTotal = localSubtotal + localShipping;
+
+      // WhatsApp path: area was resolved above with a safe fallback.
+      await assertStock(items);
+      await reserveStock(items);
+      reserved = true;
+
+      const customerUser = await getCustomer();
+      const order = await prisma.order.create({
+        data: {
+          orderNumber: generateOrderNumber(),
+          userId: customerUser?.id ?? null,
+          email: sanitizeEmail(customer.email),
+          status: "PENDING",
+          subtotal: localSubtotal,
+          shipping: localShipping,
+          tax: 0,
+          total: localTotal,
+          currency: settings.localCurrency,
+          provider: "WHATSAPP",
+          channel: "whatsapp",
+          whatsappPhone: normalizePhone(customer.phone),
+          deliveryInstructions: customer.deliveryInstructions
+            ? sanitizeText(customer.deliveryInstructions, 300)
+            : null,
+          expiresAt: new Date(Date.now() + settings.reservationMinutes * 60_000),
+          waState: "created",
+          localAmount: localTotal,
+          localCurrency: settings.localCurrency,
+          shippingName: sanitizeText(customer.fullName, 120),
+          shippingLine1: sanitizeText(customer.line1, 200),
+          shippingLine2: customer.line2 ? sanitizeText(customer.line2, 200) : null,
+          shippingCity: sanitizeText(customer.city, 80),
+          shippingRegion: customer.region ? sanitizeText(customer.region, 80) : null,
+          shippingPostal: customer.postalCode ? sanitizeText(customer.postalCode, 20) : null,
+          shippingCountry: customer.country.toUpperCase(),
+          shippingPhone: sanitizeText(customer.phone, 20),
+          items: {
+            create: items.map((i) => {
+              const variant = variants.find((v) => v.id === i.variantId);
+              if (!variant) throw new Error("variant missing during order creation");
+              return {
+                variantId: variant.id,
+                productName: variant.product.name,
+                variantSku: variant.sku,
+                size: variant.size,
+                color: variant.color,
+                image: variant.product.images[0] ?? null,
+                unitPrice: Math.round((priceMap.get(variant.id) ?? 0) * rate),
+                quantity: i.quantity,
+              };
+            }),
+          },
+        },
+        include: { items: true },
+      });
+
+      const message = composeOrderMessage({
+        orderNumber: order.orderNumber,
+        lines: order.items.map((i) => ({
+          productName: i.productName,
+          size: i.size,
+          color: i.color,
+          quantity: i.quantity,
+          lineTotal: parseFloat(i.unitPrice.toString()) * i.quantity,
+        })),
+        subtotal: localSubtotal,
+        shipping: localShipping,
+        total: localTotal,
+        currency: settings.localCurrency,
+        deliveryArea: area.name,
+        addressLine: [order.shippingLine1, order.shippingLine2, order.shippingCity]
+          .filter(Boolean)
+          .join(", "),
+        name: order.shippingName,
+        phone: customer.phone,
+        instructions: order.deliveryInstructions,
+      });
+
+      return NextResponse.json({
+        ok: true,
+        channel: "whatsapp",
+        orderNumber: order.orderNumber,
+        whatsappUrl: `https://wa.me/${settings.whatsappNumber}?text=${encodeURIComponent(message)}`,
+        expiresAt: order.expiresAt,
+      });
+    }
+
+    // ─── Gateway checkout path (Stripe / Paystack / Flutterwave) ──────────
 
     // Hard inventory gate.
     await assertStock(items);

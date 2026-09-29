@@ -80,6 +80,45 @@ export async function releaseStock(lines: { variantId: string; quantity: number 
   );
 }
 
+/**
+ * Release stock for WhatsApp orders whose reservation TTL expired unpaid.
+ * Idempotent + concurrency-safe: each order is flipped out of PENDING/INITIATED
+ * with a guarded conditional update before its stock is released, so double
+ * runs (lazy checkout call + cron sweep) can never double-release.
+ * Only unpaid orders expire — partially-paid / under-review orders need a human.
+ */
+export async function releaseExpiredReservations(): Promise<number> {
+  const expired = await prisma.order.findMany({
+    where: {
+      channel: "whatsapp",
+      status: "PENDING",
+      paymentStatus: "INITIATED",
+      expiresAt: { lt: new Date() },
+    },
+    include: { items: true },
+    take: 100,
+  });
+
+  let released = 0;
+  for (const order of expired) {
+    const flipped = await prisma.order.updateMany({
+      where: { id: order.id, status: "PENDING", paymentStatus: "INITIATED" },
+      data: { status: "FAILED", paymentStatus: "FAILED", waState: "expired" },
+    });
+    if (flipped.count !== 1) continue; // lost a race — already handled elsewhere
+    await releaseStock(order.items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })));
+    await prisma.orderEvent.create({
+      data: {
+        orderId: order.id,
+        kind: "order.expired",
+        message: "Reservation expired before payment — stock released",
+      },
+    });
+    released += 1;
+  }
+  return released;
+}
+
 /** Commit a sale: deduct on-hand and release the reservation (webhook-only). */
 export async function commitStock(lines: { variantId: string; quantity: number }[]) {
   await prisma.$transaction(

@@ -45,6 +45,10 @@ export async function initProviderPayment(
     case "MOBILE_MONEY":
       // Mobile Money rides the Flutterwave rails in every supported corridor.
       return initFlutterwave(input);
+    case "WHATSAPP":
+      // WhatsApp orders never initialize a gateway — the checkout route
+      // handles them before this adapter is ever reached.
+      throw new Error("WhatsApp orders do not use a payment gateway");
     default: {
       const never: never = input.provider;
       throw new Error(`Unsupported provider: ${never}`);
